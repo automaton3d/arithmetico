@@ -1,3 +1,4 @@
+// pulsating.c
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +15,7 @@ const int MID = L / 2;
 const int R_MAX = L / 2;
 
 /* =========================================================
- * Pulso determinístico sem estado global
+ * Deterministic pulse without global state
  * ========================================================= */
 unsigned int pulse_from_time(unsigned int t)
 {
@@ -41,7 +42,7 @@ unsigned int pulse_from_time(unsigned int t)
 }
 
 /* =========================================================
- * Inicialização
+ * Initialization
  * ========================================================= */
 void init_ca(void)
 {
@@ -128,7 +129,7 @@ void render_frame(SDL_Renderer* ren,
 }
 
 /* =========================================================
- * Frente de onda
+ * Wavefront
  * ========================================================= */
 void update_wavefront(void)
 {
@@ -264,7 +265,7 @@ int main(void)
 
     SDL_Window* win =
         SDL_CreateWindow(
-            "CA - Frente de Onda (Ultra Enxuta)",
+            "CA - Wavefront (Ultra Compact)",
             900,
             900,
             0
