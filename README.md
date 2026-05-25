@@ -1,4 +1,4 @@
-# arithmetico
+# Arithmetico
 
 **Euclidean geometry emerging from pure unsigned integer arithmetic.**  
 A minimal 3D cellular automaton in which the exact quadratic metric $r^2 = x^2 + y^2 + z^2$ is reconstructed through local natural-number wavefront propagation.
