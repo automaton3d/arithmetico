@@ -1,7 +1,7 @@
+#ifdef TEST
 /*
  * pulsating_test.c
  * Precision analysis for the emergent quadratic metric.
- * SEM divisão (exceto sqrt na análise, que é apenas para relatório)
  */
 
 #include <stdio.h>
@@ -20,7 +20,8 @@ void analyze_metric_precision(void)
     unsigned long long samples = 0;
 
     int worst_x = 0, worst_y = 0, worst_z = 0;
-    unsigned active_count = 0;
+    unsigned active_interact_count = 0;
+    unsigned active_visual_count = 0;
     unsigned total_inside = 0;
 
     for (unsigned x = 0; x < L; x++)
@@ -41,8 +42,10 @@ void analyze_metric_precision(void)
             continue;
 
         total_inside++;
-        if (c->active)
-            active_count++;
+        if (c->active_interact)
+            active_interact_count++;
+        if (c->active_visual)
+            active_visual_count++;
 
         double propagated_r2 = (double)c->r2;
         double r2_error = (propagated_r2 > exact_r2) ? (propagated_r2 - exact_r2) : (exact_r2 - propagated_r2);
@@ -83,7 +86,8 @@ void analyze_metric_precision(void)
     printf("Sphere limit r2           : %u\n", sphere_limit_r2);
     printf("Samples inside sphere     : %llu\n", samples);
     printf("Total cells inside sphere : %u\n", total_inside);
-    printf("Active cells (current)    : %u\n", active_count);
+    printf("Active (interact) cells   : %u (casca fina ~4πR)\n", active_interact_count);
+    printf("Active (visual) cells     : %u (casca densa ~4πR²)\n", active_visual_count);
     printf("Max r2 error              : %.12f\n", max_r2_error);
     printf("Max radial error          : %.12f\n", max_radial_error);
     printf("RMS radial error          : %.12f\n", rms_error);
@@ -92,3 +96,4 @@ void analyze_metric_precision(void)
     printf("========================================\n");
     fflush(stdout);
 }
+#endif

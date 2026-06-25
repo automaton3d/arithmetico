@@ -1,3 +1,4 @@
+#ifdef PULSE
 // pulsating.c
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -14,31 +15,32 @@ Cell (*grid_next)[L][L];
 const int MID = L / 2;
 const int R_MAX = L / 2;
 
-/* Constantes do pulso - calculadas em tempo de compilação */
-const unsigned int PULSE_MAX_R2 = (unsigned int)((L/2) * (L/2) * 0.92);  // 60*60*0.92 = 3312
-const unsigned int PULSE_SPAN = PULSE_MAX_R2 - PULSE_MIN_R2;  // 3312 - 25 = 3287
-const unsigned int PULSE_PERIOD = 2 * PULSE_SPAN;  // 6574
-
 /* =========================================================
- * Pulse update WITHOUT division or modulo
- * Usa apenas adição e subtração
+ * Pulse update - Triangular completo
+ * Ativa células tanto na subida quanto na descida
+ * SEM divisão, SEM módulo
  * ========================================================= */
-void pulse_update(unsigned int *phase, unsigned int *pulse_r2)
+void pulse_update_triangular(unsigned int *phase, unsigned int *pulse_r2, unsigned int *direction)
 {
-    // Incrementa fase
-    *phase += PULSE_STEP;
-
-    // Wrap-around sem divisão (subtrai period enquanto necessário)
-    while (*phase >= PULSE_PERIOD) {
-        *phase -= PULSE_PERIOD;
-    }
-
-    // Calcula o r2 do pulso baseado na fase
-    if (*phase < PULSE_SPAN) {
-        *pulse_r2 = PULSE_MIN_R2 + *phase;
+    if (*direction == 0) {
+        // Subindo
+        if (*phase < PULSE_MAX_R2) {
+            (*phase)++;
+        } else {
+            *direction = 1;
+            if (*phase > 0) (*phase)--;
+        }
     } else {
-        *pulse_r2 = PULSE_MAX_R2 - (*phase - PULSE_SPAN);
+        // Descendo
+        if (*phase > PULSE_MIN_R2) {
+            (*phase)--;
+        } else {
+            *direction = 0;
+            if (*phase < PULSE_MAX_R2) (*phase)++;
+        }
     }
+
+    *pulse_r2 = *phase;
 }
 
 /* =========================================================
@@ -50,16 +52,17 @@ void init_ca(void)
     for (unsigned y = 0; y < L; y++)
     for (unsigned z = 0; z < L; z++) {
         grid[x][y][z].r2 = INF_R2;
-        grid[x][y][z].active = 0;
+        grid[x][y][z].active_interact = 0;
+        grid[x][y][z].active_visual = 0;
     }
 
     grid[MID][MID][MID].r2 = 0;
-    grid[MID][MID][MID].active = 0;
+    grid[MID][MID][MID].active_interact = 0;
+    grid[MID][MID][MID].active_visual = 0;
 }
 
 /* =========================================================
  * Wavefront propagation (Dijkstra-like, synchronous)
- * SEM divisão, SEM módulo, SEM floats
  * ========================================================= */
 void update_wavefront(void)
 {
@@ -73,12 +76,10 @@ void update_wavefront(void)
         if (curr->r2 == INF_R2)
             continue;
 
-        // Distância Manhattan ao centro em cada eixo
         unsigned ax = (x > MID) ? (x - MID) : (MID - x);
         unsigned ay = (y > MID) ? (y - MID) : (MID - y);
         unsigned az = (z > MID) ? (z - MID) : (MID - z);
 
-        // 6 vizinhos (faces)
         for (unsigned d = 0; d < 6; d++) {
             unsigned nx = x;
             unsigned ny = y;
@@ -121,43 +122,57 @@ void update_wavefront(void)
 
             if (new_r2 < nxt->r2) {
                 nxt->r2 = new_r2;
-                // r2 mudou, então active pode estar inconsistente
-                nxt->active = 0;
+                // r2 mudou, desliga os bits
+                nxt->active_interact = 0;
+                nxt->active_visual = 0;
             }
         }
     }
 
-    // Centro sempre tem r2 = 0
     grid_next[MID][MID][MID].r2 = 0;
-    grid_next[MID][MID][MID].active = 0;
+    grid_next[MID][MID][MID].active_interact = 0;
+    grid_next[MID][MID][MID].active_visual = 0;
 }
 
 /* =========================================================
- * Update active flags based on current pulse
- * Regra completamente local: cada célula compara seu r2 com o pulso
- * SEM divisão, SEM módulo, SEM floats
+ * Update active flags com DOIS BITS:
+ * - active_interact: casca fina (thickness = 1) para interação precisa
+ * - active_visual:   casca densa (thickness = 2R+1) para visualização
  * ========================================================= */
 void update_active_flags(unsigned int pulse_r2)
 {
+    // Calcula R = floor(sqrt(pulse_r2)) sem divisão
+    unsigned int R = 0;
+    while ((R + 1) * (R + 1) <= pulse_r2) {
+        R++;
+    }
+
+    // Espessura para visualização: casca densa (~4πR² pontos)
+    unsigned int visual_thickness = 2 * R + 1;
+    if (visual_thickness < 5) visual_thickness = 5;
+    if (visual_thickness > 200) visual_thickness = 200;
+
+    // Espessura para interação: casca fina (ativação precisa)
+    const unsigned int interact_thickness = 1;
+
     for (unsigned x = 0; x < L; x++)
     for (unsigned y = 0; y < L; y++)
     for (unsigned z = 0; z < L; z++) {
         Cell *c = &grid[x][y][z];
 
         if (c->r2 == INF_R2) {
-            c->active = 0;
+            c->active_interact = 0;
+            c->active_visual = 0;
             continue;
         }
 
-        // Calcula diff = |c->r2 - pulse_r2| sem usar abs (que pode usar分支)
-        unsigned int diff;
-        if (c->r2 > pulse_r2) {
-            diff = c->r2 - pulse_r2;
-        } else {
-            diff = pulse_r2 - c->r2;
-        }
+        unsigned int diff = (c->r2 > pulse_r2) ? (c->r2 - pulse_r2) : (pulse_r2 - c->r2);
 
-        c->active = (diff <= ACTIVE_THICKNESS);
+        // Bit de interação: casca fina (preciso)
+        c->active_interact = (diff <= interact_thickness);
+
+        // Bit de visualização: casca densa (para mostrar muitos pontos)
+        c->active_visual = (diff <= visual_thickness);
     }
 }
 
@@ -172,7 +187,7 @@ void update_ca(unsigned int pulse_r2)
 }
 
 /* =========================================================
- * Render
+ * Render (corte equatorial) - usa active_visual
  * ========================================================= */
 void render_frame(SDL_Renderer* ren,
                   SDL_Texture* tex,
@@ -189,6 +204,8 @@ void render_frame(SDL_Renderer* ren,
     const float raio_min = raio_ideal - 0.5f;
     const float raio_max = raio_ideal + 0.5f;
 
+    (void)pulse_r2;
+
     for (unsigned y = 0; y < L; y++) {
         for (unsigned x = 0; x < L; x++) {
             uint32_t pix = COLOR_BG;
@@ -196,7 +213,6 @@ void render_frame(SDL_Renderer* ren,
             int gx = x - MID;
             int gy = y - MID;
 
-            // Grade de referência (usando valor absoluto sem divisão)
             int abs_gx = (gx < 0) ? -gx : gx;
             int abs_gy = (gy < 0) ? -gy : gy;
 
@@ -204,20 +220,17 @@ void render_frame(SDL_Renderer* ren,
                 pix = COLOR_REF_GRID;
             }
 
-            // Círculo de referência (precisa de sqrt para visualização, não para o CA)
-            // NOTA: sqrt é usado APENAS na renderização, não na lógica do CA
             float raio = sqrtf((float)(gx * gx + gy * gy));
             if (raio >= raio_min && raio <= raio_max) {
                 pix = COLOR_REF_CIRC;
             }
 
-            // Célula ativa na superfície (usa o bit, não compara r2)
             Cell *c = &grid[x][y][MID];
-            if (c->active) {
+            // Usa active_visual para renderização
+            if (c->active_visual) {
                 pix = COLOR_SHELL;
             }
 
-            // Centro
             if (x == MID && y == MID) {
                 pix = COLOR_CENTER;
             }
@@ -235,12 +248,12 @@ void render_frame(SDL_Renderer* ren,
 /* =========================================================
  * Main
  * ========================================================= */
-int main(void)
+int main__(void)
 {
     SDL_Init(SDL_INIT_VIDEO);
 
     SDL_Window* win = SDL_CreateWindow(
-        "CA - Wavefront (Active Surface) - No Division",
+        "CA - Wavefront (Two Bits: Interact + Visual)",
         900,
         900,
         0
@@ -262,9 +275,9 @@ int main(void)
 
     init_ca();
 
-    // Estado do pulso (apenas no controlador, não no CA)
-    unsigned int phase = 0;
-    unsigned int pulse_r2 = PULSE_MIN_R2;
+    unsigned int phase = PULSE_MIN_R2;
+    unsigned int direction = 0;
+    unsigned int pulse_r2;
     unsigned int tick = 0;
 
     while (1) {
@@ -274,13 +287,8 @@ int main(void)
                 goto cleanup;
         }
 
-        // Atualiza o pulso SEM divisão
-        pulse_update(&phase, &pulse_r2);
-
-        // Atualiza o CA com o pulso atual
+        pulse_update_triangular(&phase, &pulse_r2, &direction);
         update_ca(pulse_r2);
-
-        // Renderiza (sqrt usado apenas aqui, na visualização)
         render_frame(ren, tex, pixels, pulse_r2);
 
         tick++;
@@ -304,3 +312,4 @@ cleanup:
 
     return 0;
 }
+#endif
